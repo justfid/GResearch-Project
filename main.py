@@ -20,32 +20,16 @@ sbuxData = pl.read_csv('SBUX.csv')
 # fig.show()
 
 ###
-filtered_df = amdData.filter(pl.col('Date') > "06/01/2025")
-selectedData = filtered_df.select(['Date', 'Close/Last'])
+selectedData = amdData.select(['Date', 'Close/Last'])
 
+signal = dict()
+dates = selectedData["Date"].to_list()
+close_last = selectedData["Close/Last"].to_list()
 
-
-signal = []
-dates = []
-
-
-
-for d in range(1, len(selectedData["Date"])):
-    if selectedData["Close/Last"][d] > selectedData["Close/Last"][d-1]:
-        signal.append(1)
-
+for d in range(1, len(dates)):
+    if close_last[d] > close_last[d-1]:
+        signal[dates[d]] = 1
     else:
-        dates.append(selectedData["Date"])
-        signal.append(0)
-
-print(dates)
+        signal[dates[d]] = 0
 
 print(signal)
-
-
-
-# if P(t) > P(t-1):
-#     signal(t+1) = 1 
-# else:
-#     signal(t+1) 0
-
