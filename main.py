@@ -1,35 +1,65 @@
-import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.csv as csv   
 import polars as pl
 import plotly.graph_objects as go
-import plotly.express as px
+
 import pandas as pd
+import plotly.graph_objects as go
 from datetime import datetime
 
-amdData = pl.read_csv('AMD.csv')
-metaData = pl.read_csv('META.csv')
-msftData = pl.read_csv('MSFT.csv')
-sbuxData = pl.read_csv('SBUX.csv')
+# Load data using Pandas
+amdData = pd.read_csv('AMD.csv')
+metaData = pd.read_csv('META.csv')
+msftData = pd.read_csv('MSFT.csv')
+sbuxData = pd.read_csv('SBUX.csv')
 
-#candlestick graph
-# fig = go.Figure(data=[go.Candlestick(x=amdData['Date'],
-#                 open=amdData['Open'],
-#                 high=amdData['High'],
-#                 low=amdData['Low'],
-#                 close=amdData['Close/Last'])])
+# Ensure 'Date' column is in datetime format
+amdData['Date'] = pd.to_datetime(amdData['Date'])
 
-# fig.show()
+# Remove dollar sign and convert 'Close/Last' to numeric
+amdData['Close/Last'] = amdData['Close/Last'].str.replace('$', '').astype(float)
 
-###
-selectedData = amdData.select(['Date', 'Close/Last'])
+# Calculate rolling averages using Pandas
+amdData['rolling50'] = amdData['Close/Last'].rolling(window=50).mean()
+amdData['rolling20'] = amdData['Close/Last'].rolling(window=20).mean()
 
-signal = dict()
-dates = selectedData["Date"].to_list()
-close_last = selectedData["Close/Last"].to_list()
+# Candlestick graph with rolling averages
+fig = go.Figure(data=[
+    go.Candlestick(
+        x=amdData['Date'],
+        open=amdData['Open'],
+        high=amdData['High'],
+        low=amdData['Low'],
+        close=amdData['Close/Last'],
+        name='Candlestick'
+    ),
+    go.Scatter(
+        x=amdData['Date'],
+        y=amdData['rolling50'],
+        mode='lines',
+        name='50-Day Rolling Average',
+        line=dict(color='blue')
+    ),
+    go.Scatter(
+        x=amdData['Date'],
+        y=amdData['rolling20'],
+        mode='lines',
+        name='20-Day Rolling Average',
+        line=dict(color='orange')
+    )
+])
 
-for d in range(1, len(dates)):
-    if close_last[d] > close_last[d-1]:
-        signal[dates[d]] = 1
-    else:
-        signal[dates[d]] = 0
+# Update layout
+fig.update_layout(
+    title='AMD Stock Price with Rolling Averages',
+    xaxis_title='Date',
+    yaxis_title='Price (USD)',
+    xaxis_rangeslider_visible=False,
+    autosize=False,
+    width=700,
+    height=500,
+    showlegend=True
+)
 
-print(signal)
+fig.show()
