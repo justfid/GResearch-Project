@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 
 #### SETUP ####
 #loads CSV with columns
-df = pd.read_csv("MSFT.csv", parse_dates=["Date"])
+df = pd.read_csv("AMD.csv", parse_dates=["Date"])
 
 #turns dates into strings
 df['Close/Last'] = df['Close/Last'].str.replace('$', '', regex=False).astype(float)
@@ -54,7 +54,8 @@ executed_sells = []
 executed_sells_prices = []
 
 conviction = 0.9  #90% of balance used for trades
-fee = 0.01 #1% fee for trades
+fee = 0.0045 #0.4% fee for trades (in line with Kraken taker fees) + 0.05% spread 
+#on high end but assumes no slippage, market impact, fees for short/longs, latency)
 
 for i in range(len(df)):
     price = df["Close/Last"].iloc[i]
@@ -94,7 +95,9 @@ for i in range(len(df)):
         if df["Long_Exit"].iloc[i]:
             position = 0
             exit_price = price
-            balance += shares * exit_price
+            proceeds = shares * exit_price #sell shares
+            exit_fee = proceeds * fee #apply fee to proceeds
+            balance += (proceeds - exit_fee) #apply fee to exit proceeds
             shares = 0
 
             executed_sells.append(df.index[i])
@@ -104,7 +107,9 @@ for i in range(len(df)):
         if df["Short_Exit"].iloc[i]:
             position = 0
             exit_price = price
-            balance -= shares * exit_price  #buy back shares
+            cost = shares * exit_price #buy back shares
+            exit_fee = cost * fee #apply fee to cost
+            balance -= (cost + exit_fee) #apply fee to exit cost
             shares = 0
 
             executed_buys.append(df.index[i])
