@@ -15,7 +15,7 @@ df = df.sort_index(ascending=True)
 
 #calculate exponential moving averages (react faster to market changes)
 #also std dev, then Z-score
-window = 20
+window = 20 #best results with 20 so variable name is EMA20
 df["EMA20"] = df["Close/Last"].ewm(span=window, adjust=False).mean() 
 #adjust=False means doesn't use FULL history / no bias correction - faster 
 df["EMA50"] = df["Close/Last"].ewm(span=50, adjust=False).mean() #used for trend filter
@@ -24,8 +24,9 @@ df["z_score"] = (df["Close/Last"] - df["EMA20"]) / df["Rolling_Std"]
 
 
 #bollinger Bands
-df["upper_band"] = df["EMA20"] + 2 * df["Rolling_Std"]
-df["lower_band"] = df["EMA20"] - 2 * df["Rolling_Std"]
+bollinger_threshold = 1.5  #num standard deviations away from EMA20
+df["upper_band"] = df["EMA20"] + (bollinger_threshold * df["Rolling_Std"])
+df["lower_band"] = df["EMA20"] - (bollinger_threshold * df["Rolling_Std"])
 
 #trend filter - moving average (with neutral zone)
 neutral_zone = 0.05  #neutral zone
@@ -47,7 +48,7 @@ df['Short_Entry'] = (df['z_score'] > z_score_threshold) & (df['Close/Last'] > df
 
 # "~" is NOT operator in pandas
 
-# Exit: Z-score has returned close to mean (0)
+#exit: Z-score has returned close to mean (0)
 df['Exit'] = (df['z_score'].abs() < z_score_exit_threshold)
 
 
