@@ -1,6 +1,17 @@
 from datetime import date
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+#### PARAMETERS ####
+window = 20 #best results with 20 so variable name is EMA20
+bollinger_threshold = 1.5  #num standard deviations away from EMA20
+neutral_zone = 0.05  #neutral zone
+z_score_threshold = 1.25  #threshold for Z-score
+z_score_exit_threshold = 0.1  #threshold for exiting trades
+conviction = 0.9  #90% of balance used for trades
+fee = 0.0045 #0.4% fee for trades (in line with Kraken taker fees) + 0.05% spread 
+#on high end but assumes no slippage, market impact, fees for short/longs, latency)
 
 #### SETUP ####
 #loads CSV with columns
@@ -15,7 +26,7 @@ df = df.sort_index(ascending=True)
 
 #calculate exponential moving averages (react faster to market changes)
 #also std dev, then Z-score
-window = 20 #best results with 20 so variable name is EMA20
+
 df["EMA20"] = df["Close/Last"].ewm(span=window, adjust=False).mean() 
 #adjust=False means doesn't use FULL history / no bias correction - faster 
 df["EMA50"] = df["Close/Last"].ewm(span=50, adjust=False).mean() #used for trend filter
@@ -24,20 +35,16 @@ df["z_score"] = (df["Close/Last"] - df["EMA20"]) / df["Rolling_Std"]
 
 
 #bollinger Bands
-bollinger_threshold = 1.5  #num standard deviations away from EMA20
 df["upper_band"] = df["EMA20"] + (bollinger_threshold * df["Rolling_Std"])
 df["lower_band"] = df["EMA20"] - (bollinger_threshold * df["Rolling_Std"])
 
 #trend filter - moving average (with neutral zone)
-neutral_zone = 0.05  #neutral zone
-
 df['trend_up'] = df['EMA20'] > df['EMA50'] * (1 - neutral_zone)
 df['trend_down'] = df['EMA20'] < df['EMA50'] * (1 + neutral_zone)
 
-#### PARAMETERS ####
 
-z_score_threshold = 1.25  #threshold for Z-score
-z_score_exit_threshold = 0.1  #threshold for exiting trades
+#### THEORY ####
+
 #long entry - price below lower band, extreme Z score, trend is up
 df['Long_Entry'] = (df['z_score'] < -z_score_threshold) & (df['Close/Last'] < df['lower_band']) & (df['trend_up'])
 
@@ -63,15 +70,13 @@ shares = 0
 portfolio_values = []
 positions = []
 
-
 executed_buys = []
 executed_buys_prices = []
 executed_sells = []
 executed_sells_prices = []
+executed_exit = []
+executed_exit_prices = []
 
-conviction = 0.9  #90% of balance used for trades
-fee = 0.0045 #0.4% fee for trades (in line with Kraken taker fees) + 0.05% spread 
-#on high end but assumes no slippage, market impact, fees for short/longs, latency)
 
 for i in range(len(df)):
     price = df["Close/Last"].iloc[i]
@@ -116,8 +121,8 @@ for i in range(len(df)):
             balance += (proceeds - exit_fee) #apply fee to exit proceeds
             shares = 0
             position = 0
-            executed_sells.append(df.index[i])
-            executed_sells_prices.append(price)
+            executed_exit.append(df.index[i])
+            executed_exit_prices.append(price)
 
     elif position == -1:
         if df["Exit"].iloc[i]:
@@ -158,8 +163,6 @@ print(f"Final balance: {balance:.2f}")
 
 
 #### PLOTLY GRAPHS ####
-
-from plotly.subplots import make_subplots
 
 #subplots
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
@@ -202,6 +205,15 @@ fig.add_trace(go.Scatter(
     mode="markers",
     marker=dict(symbol="triangle-down", color="red", size=14),
     name="Executed Sell"
+), row=1, col=1)
+
+#executed exits (red triangle)
+fig.add_trace(go.Scatter(
+    x=executed_exit,
+    y=executed_exit_prices,
+    mode="markers",
+    marker=dict(symbol="diamond", color="purple", size=14),
+    name="Executed Exit"
 ), row=1, col=1)
 
 #upper Bollinger Band
