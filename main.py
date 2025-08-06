@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 
 #### SETUP ####
 #loads CSV with columns
-df = pd.read_csv("META.csv", parse_dates=["Date"])
+df = pd.read_csv("AMD.csv", parse_dates=["Date"])
 
 #turns dates into strings
 df["Close/Last"] = df["Close/Last"].str.replace("$", "", regex=False).astype(float)
@@ -27,21 +27,28 @@ df["z_score"] = (df["Close/Last"] - df["EMA20"]) / df["Rolling_Std"]
 df["upper_band"] = df["EMA20"] + 2 * df["Rolling_Std"]
 df["lower_band"] = df["EMA20"] - 2 * df["Rolling_Std"]
 
-#trend filter - moving average
-df['trend_up'] = df['EMA20'] > df['EMA50']
+#trend filter - moving average (with neutral zone)
+neutral_zone = 0.05  #neutral zone
+
+df['trend_up'] = df['EMA20'] > df['EMA50'] * (1 - neutral_zone)
+df['trend_down'] = df['EMA20'] < df['EMA50'] * (1 + neutral_zone)
 
 #### PARAMETERS ####
 
+z_score_threshold = 1.25  #threshold for Z-score
+z_score_exit_threshold = 0.1  #threshold for exiting trades
 #long entry - price below lower band, extreme Z score, trend is up
-df['Long_Entry'] = (df['z_score'] < -1.5) & (df['Close/Last'] < df['lower_band']) & df['trend_up']
+df['Long_Entry'] = (df['z_score'] < -z_score_threshold) & (df['Close/Last'] < df['lower_band']) & (df['trend_up'])
 
-# "&"works with pandas
+# "&"works with pandas - and
 
 #short entry - price above upper band, extreme Z score, trend is down
-df['Short_Entry'] = (df['z_score'] > 1.5) & (df['Close/Last'] > df['upper_band']) & (~df['trend_up'])
+df['Short_Entry'] = (df['z_score'] > z_score_threshold) & (df['Close/Last'] > df['upper_band']) & (~df['trend_up'])
+
+# "~" is NOT operator in pandas
 
 # Exit: Z-score has returned close to mean (0)
-df['Exit'] = (df['z_score'].abs() < 0.1)
+df['Exit'] = (df['z_score'].abs() < z_score_exit_threshold)
 
 
 
@@ -156,9 +163,9 @@ from plotly.subplots import make_subplots
 #subplots
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
                     vertical_spacing=0.1,
-                    subplot_titles=("Price with Moving Average", "Z-Score", "Portfolio Value"))
+                    subplot_titles=("Price with EMA & Bollinger Bands", "Portfolio Value", "Z-Score",))
 
-#candlestick plot for price
+#candlestick plot for price (row 1)
 fig.add_trace(go.Candlestick(x=df.index,
                              open=df["Open"],
                              high=df["High"],
@@ -166,7 +173,7 @@ fig.add_trace(go.Candlestick(x=df.index,
                              close=df["Close/Last"],
                              name="Price"), row=1, col=1)
 
-#rolling mean line
+#EMA lines
 fig.add_trace(go.Scatter(x=df.index, y=df["EMA20"],
                          mode="lines",
                          line=dict(color="orange", width=2),
@@ -214,27 +221,58 @@ fig.add_trace(go.Scatter(
     name="Lower Bollinger Band"
 ), row=1, col=1)
 
-#plot Z-score
-fig.add_trace(go.Scatter(x=df.index, y=df["z_score"],
-                         mode="lines",
-                         line=dict(color="green", width=2),
-                         name="Z-Score"), row=2, col=1)
-
-#thresholds on Z-score plot
-fig.add_hline(y=0, line_dash="dash", line_color="black", row=2, col=1)
-fig.add_hline(y=1.5, line_dash="dash", line_color="red", row=2, col=1)
-fig.add_hline(y=-1.5, line_dash="dash", line_color="red", row=2, col=1)
-
+#portfolio value plot
 fig.add_trace(go.Scatter(
     x=df.index,
     y=df["Portfolio_Value"],
     mode="lines",
     line=dict(color="black", width=2),
     name="Portfolio Value ($)"
-), row=3, col=1)
+), row=2, col=1)
+
+#plot Z-score
+fig.add_trace(go.Scatter(x=df.index, y=df["z_score"],
+                         mode="lines",
+                         line=dict(color="green", width=2),
+                         name="Z-Score"), row=3, col=1)
+
+#thresholds on Z-score plot
+fig.add_hline(y=0, line_dash="dash", line_color="black", row=3, col=1)
+fig.add_hline(y=z_score_threshold, line_dash="dash", line_color="red", row=3, col=1)
+fig.add_hline(y=-z_score_threshold, line_dash="dash", line_color="red", row=3, col=1)
 
 #update layout
 fig.update_layout(height=1050, width=1900, title_text="Stock Price & Z-Score Analysis")
+
+#add button to toggle between linear/log scale (not to z score plot)
+fig.update_layout(
+    updatemenus=[
+        dict(
+            type="buttons",
+            direction="right",
+            x=0.7,
+            y=1.15,
+            buttons=list([
+                dict(
+                    args=[
+                        {"yaxis.type": "linear", "yaxis2.type": "linear"}
+                    ],
+                    label="Linear",
+                    method="relayout"
+                ),
+                dict(
+                    args=[
+                        {"yaxis.type": "log", "yaxis2.type": "log"}
+                    ],
+                    label="Log",
+                    method="relayout"
+                )
+            ]),
+            showactive=True
+        )
+    ]
+)
+
 fig.update_xaxes(rangeslider_visible=False)
 
 fig.show()
