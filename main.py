@@ -10,8 +10,10 @@ neutral_zone = 0.05  #neutral zone
 z_score_threshold = 1.25  #threshold for Z-score
 z_score_exit_threshold = 0.1  #threshold for exiting trades
 conviction = 0.9  #90% of balance used for trades
-fee = 0.0045 #0.4% fee for trades (in line with Kraken taker fees) + 0.05% spread 
-#on high end but assumes no slippage, market impact, fees for short/longs, latency)
+fee = 0.00001 #0.001% fee per trade (GIVEN)
+risk_free_rate = 0.025 #assumed annualised risk-free rate
+initial_balance = 100000 #initial balance in USD (GIVEN)
+short_daily_fee = 0.0001 #0.01% daily fee for shorting (GIVEN)
 
 #### SETUP ####
 #loads CSV with columns
@@ -61,14 +63,13 @@ df['Exit'] = (df['z_score'].abs() < z_score_exit_threshold)
 
 
 #### TRADING LOGIC ####
-
-initial_balance = 1000
 balance = initial_balance
 position = 0  # 0 = none, 1 = long, -1 = short
 entry_price = 0
 shares = 0
 portfolio_values = []
 positions = []
+short_entry_index = None
 
 executed_buys = []
 executed_buys_prices = []
@@ -92,7 +93,7 @@ for i in range(len(df)):
         #long entry with bollenger bands
         if df["Long_Entry"].iloc[i]:
             trade_amount = balance * conviction
-            entry_fee = trade_amount * fee
+            entry_fee = (trade_amount * fee) + 1 #add 1 to fee as fixed fee on top
             total_cost = trade_amount + entry_fee #apply fee to trade amount
             if total_cost <= balance: #prevents negative balance
                 position = 1
@@ -105,11 +106,12 @@ for i in range(len(df)):
         #only go short if bear market
         elif df["Short_Entry"].iloc[i]:
             trade_amount = balance * conviction 
-            entry_fee = trade_amount * fee
+            entry_fee = (trade_amount * fee) + 1 #add 1 to fee as fixed fee on top
             position = -1 
             entry_price = price 
             shares = trade_amount / price 
             balance += (trade_amount - entry_fee) #shorting gives you cash, applies fee
+            short_entry_index = i  #track when the short started
             executed_sells.append(df.index[i])
             executed_sells_prices.append(price)
 
@@ -130,12 +132,21 @@ for i in range(len(df)):
             exit_price = price
             cost = shares * exit_price #buy back shares
             exit_fee = cost * fee
-            balance -= (cost + exit_fee) #apply fee to exit cost
+
+            #calculate days held and apply daily short fee
+            if short_entry_index is not None:
+                days_held = i - short_entry_index
+                short_fee_total = shares * entry_price * short_daily_fee * days_held
+            else:
+                short_fee_total = 0
+
+            balance -= (cost + exit_fee + short_fee_total) #apply exit fees and overall short fee
             shares = 0
             position = 0
             executed_buys.append(df.index[i])
             executed_buys_prices.append(price)
-
+            short_entry_index = None  #resets
+            executed_exit
     positions.append(position)
 
 #force close any open position at the last price to calculate final portfolio value
@@ -151,11 +162,37 @@ elif position == -1 and shares > 0:
     position = 0
     #print("Force-closed short at end.") #redundant but useful for debugging
 
+elif position == -1 and shares > 0:
+    if short_entry_index is not None:
+        days_held = len(df) - 1 - short_entry_index
+        short_fee_total = shares * entry_price * short_daily_fee * days_held
+    else:
+        short_fee_total = 0
+    balance -= (shares * last_price + short_fee_total)
+    shares = 0
+    position = 0
+
 #update final portfolio value
 portfolio_values[-1] = balance
 
 df["Portfolio_Value"] = portfolio_values
 df["Position"] = positions
+
+#### SHARPE RATIO ####
+#calculate daily returns of strategy
+df['Strategy_Return'] = df['Portfolio_Value'].pct_change()
+
+#calculate mean and std deviation of trade returns
+mean_strategy_return = df['Strategy_Return'].mean() #daily
+std_strategy_return = df['Strategy_Return'].std() #daily
+
+#annualised return and Sharpe Ratio
+annual_return = mean_strategy_return * 252
+annual_std = std_strategy_return * (252 ** 0.5) #square root of 252 trading days
+annual_sharpe = (annual_return - risk_free_rate) / annual_std 
+
+print(f"Annual Return: {annual_return:.4f}")
+print(f"Annual Sharpe Ratio: {annual_sharpe:.4f}")
 
 print(f"Final balance: {balance:.2f}") 
 #print(f"Final shares: {shares:.4f}") #not needed will force close at end
@@ -289,3 +326,14 @@ fig.update_layout(
 fig.update_xaxes(rangeslider_visible=False)
 
 fig.show()
+
+
+# The Sharpe Ratio is a measure of risk-adjusted return, helping investors understand the return of an investment compared to its risk.
+
+# SharpeRatio=R¯¯¯¯−Rfσ
+
+# where:
+
+#     R¯¯¯¯ is the average return of the investment
+#     Rf is the risk-free rate (often a Treasury bond rate)
+#     σ is the standard deviation of the return
