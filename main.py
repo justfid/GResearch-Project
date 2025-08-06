@@ -2,6 +2,7 @@ from datetime import date
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.figure_factory as ff
 
 #### PARAMETERS ####
 window = 20 #best results with 20 so variable name is EMA20
@@ -191,9 +192,9 @@ annual_return = mean_strategy_return * 252
 annual_std = std_strategy_return * (252 ** 0.5) #square root of 252 trading days
 annual_sharpe = (annual_return - risk_free_rate) / annual_std 
 
-print(f"Annual Return: {annual_return:.4f}")
+print(f"Annual (avg) Return (Percentage): {(annual_return * 100).round(4)}%")
 print(f"Annual Sharpe Ratio: {annual_sharpe:.4f}")
-
+print(f"Final profit /loss: {balance - initial_balance:.2f} USD")
 print(f"Final balance: {balance:.2f}") 
 #print(f"Final shares: {shares:.4f}") #not needed will force close at end
 #print(f"Final position: {position}") #not needed will force close at end
@@ -280,6 +281,17 @@ fig.add_trace(go.Scatter(
     name="Portfolio Value ($)"
 ), row=2, col=1)
 
+#add baseline at initial balance
+fig.add_hline(
+    y=initial_balance,
+    line_dash="dot",
+    line_color="gray",
+    annotation_text="Initial Balance",
+    annotation_position="top left",
+    row=2,
+    col=1
+)
+
 #plot Z-score
 fig.add_trace(go.Scatter(x=df.index, y=df["z_score"],
                          mode="lines",
@@ -325,15 +337,49 @@ fig.update_layout(
 
 fig.update_xaxes(rangeslider_visible=False)
 
+#### TABLES ####
+#create year column from the index
+df['Year'] = df.index.year
+
+#calculate yearly profit
+yearly_profit = df.groupby('Year')['Portfolio_Value'].agg(['first', 'last'])
+yearly_profit['Profit'] = yearly_profit['last'] - yearly_profit['first']
+
+#calculate yearly Sharpe ratio
+def yearly_sharpe(group):
+    returns = group['Portfolio_Value'].pct_change() #daily returns
+    mean_return = returns.mean() * 252  # annualised
+    std_return = returns.std() * (252 ** 0.5)  # annualised
+    sharpe = (mean_return - risk_free_rate) / std_return
+    return sharpe
+
+yearly_sharpe_ratios = df.groupby('Year').apply(yearly_sharpe) #apply function to each group
+#code will be deprecated in future versions - doesn't affect functionality NOW
+yearly_profit['Sharpe Ratio'] = yearly_sharpe_ratios
+
+#plotly table
+table_data = yearly_profit.reset_index()[['Year', 'Profit', 'Sharpe Ratio']]
+table_data['Profit'] = table_data['Profit'].map('{:.2f}'.format) 
+table_data['Sharpe Ratio'] = table_data['Sharpe Ratio'].map('{:.2f}'.format)
+
+fig_table = ff.create_table(table_data) 
+fig_table.update_layout(width=500, height=400, title="Yearly Profit & Sharpe Ratio")
+
+
+#summary table for overall results
+summary_data = pd.DataFrame({
+    "Metric": ["Final Profit (USD)", "Final Portfolio Value (USD)", "Overall Sharpe Ratio"],
+    "Value": [
+        f"{(balance - initial_balance):.2f}",
+        f"{balance:.2f}",
+        f"{annual_sharpe:.2f}"
+    ]
+})
+
+fig_summary = ff.create_table(summary_data) 
+fig_summary.update_layout(width=500, height=200, title="Overall Performance Summary")
+
+#show tables and plots
 fig.show()
-
-
-# The Sharpe Ratio is a measure of risk-adjusted return, helping investors understand the return of an investment compared to its risk.
-
-# SharpeRatio=R¯¯¯¯−Rfσ
-
-# where:
-
-#     R¯¯¯¯ is the average return of the investment
-#     Rf is the risk-free rate (often a Treasury bond rate)
-#     σ is the standard deviation of the return
+fig_table.show()
+fig_summary.show()
