@@ -6,13 +6,13 @@ import plotly.figure_factory as ff
 
 #### PARAMETERS ####
 window = 20 #best results with 20 so variable name is EMA20
-bollinger_threshold = 1.5  #num standard deviations away from EMA20
-neutral_zone = 0.05  #neutral zone
+bollinger_threshold = 0.5  #num standard deviations away from EMA20
+neutral_zone =  1  #neutral zone
 z_score_threshold = 1.25  #threshold for Z-score
 z_score_exit_threshold = 0.1  #threshold for exiting trades
 conviction = 0.9  #90% of balance used for trades
 fee = 0.00001 #0.001% fee per trade (GIVEN)
-risk_free_rate = 0.025 #assumed annualised risk-free rate
+risk_free_rate = 0 #assumed annualised risk-free rate (GIVEN)
 initial_balance = 100000 #initial balance in USD (GIVEN)
 short_daily_fee = 0.0001 #0.01% daily fee for shorting (GIVEN)
 
@@ -30,8 +30,8 @@ df = df.sort_index(ascending=True)
 #calculate exponential moving averages (react faster to market changes)
 #also std dev, then Z-score
 
-df["EMA20"] = df["Close/Last"].ewm(span=window, adjust=False).mean() 
-#adjust=False means doesn't use FULL history / no bias correction - faster 
+df["EMA20"] = df["Close/Last"].ewm(span=window, adjust=False).mean()
+#adjust=False means doesn't use FULL history / no bias correction - faster
 df["EMA50"] = df["Close/Last"].ewm(span=50, adjust=False).mean() #used for trend filter
 df["Rolling_Std"] = df["Close/Last"].rolling(window).std()
 df["z_score"] = (df["Close/Last"] - df["EMA20"]) / df["Rolling_Std"]
@@ -106,11 +106,11 @@ for i in range(len(df)):
 
         #only go short if bear market
         elif df["Short_Entry"].iloc[i]:
-            trade_amount = balance * conviction 
+            trade_amount = balance * conviction
             entry_fee = (trade_amount * fee) + 1 #add 1 to fee as fixed fee on top
-            position = -1 
-            entry_price = price 
-            shares = trade_amount / price 
+            position = -1
+            entry_price = price
+            shares = trade_amount / price
             balance += (trade_amount - entry_fee) #shorting gives you cash, applies fee
             short_entry_index = i  #track when the short started
             executed_sells.append(df.index[i])
@@ -120,7 +120,7 @@ for i in range(len(df)):
         if df["Exit"].iloc[i]:
             exit_price = price
             proceeds = shares * exit_price #sell shares
-            exit_fee = proceeds * fee
+            exit_fee = (proceeds * fee) + 1
             balance += (proceeds - exit_fee) #apply fee to exit proceeds
             shares = 0
             position = 0
@@ -132,7 +132,7 @@ for i in range(len(df)):
 
             exit_price = price
             cost = shares * exit_price #buy back shares
-            exit_fee = cost * fee
+            exit_fee = (cost * fee) + 1
 
             #calculate days held and apply daily short fee
             if short_entry_index is not None:
@@ -190,12 +190,12 @@ std_strategy_return = df['Strategy_Return'].std() #daily
 #annualised return and Sharpe Ratio
 annual_return = mean_strategy_return * 252
 annual_std = std_strategy_return * (252 ** 0.5) #square root of 252 trading days
-annual_sharpe = (annual_return - risk_free_rate) / annual_std 
+annual_sharpe = (annual_return) / annual_std
 
 print(f"Annual (avg) Return (Percentage): {(annual_return * 100).round(4)}%")
 print(f"Annual Sharpe Ratio: {annual_sharpe:.4f}")
 print(f"Final profit /loss: {balance - initial_balance:.2f} USD")
-print(f"Final balance: {balance:.2f}") 
+print(f"Final balance: {balance:.2f}")
 #print(f"Final shares: {shares:.4f}") #not needed will force close at end
 #print(f"Final position: {position}") #not needed will force close at end
 
@@ -359,10 +359,10 @@ yearly_profit['Sharpe Ratio'] = yearly_sharpe_ratios
 
 #plotly table
 table_data = yearly_profit.reset_index()[['Year', 'Profit', 'Sharpe Ratio']]
-table_data['Profit'] = table_data['Profit'].map('{:.2f}'.format) 
+table_data['Profit'] = table_data['Profit'].map('{:.2f}'.format)
 table_data['Sharpe Ratio'] = table_data['Sharpe Ratio'].map('{:.2f}'.format)
 
-fig_table = ff.create_table(table_data) 
+fig_table = ff.create_table(table_data)
 fig_table.update_layout(width=500, height=400, title="Yearly Profit & Sharpe Ratio")
 
 
@@ -376,7 +376,7 @@ summary_data = pd.DataFrame({
     ]
 })
 
-fig_summary = ff.create_table(summary_data) 
+fig_summary = ff.create_table(summary_data)
 fig_summary.update_layout(width=500, height=200, title="Overall Performance Summary")
 
 #show tables and plots
