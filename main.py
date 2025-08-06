@@ -4,40 +4,48 @@ import plotly.graph_objects as go
 
 #### SETUP ####
 #loads CSV with columns
-df = pd.read_csv("AMD.csv", parse_dates=["Date"])
+df = pd.read_csv("META.csv", parse_dates=["Date"])
 
 #turns dates into strings
-df['Close/Last'] = df['Close/Last'].str.replace('$', '', regex=False).astype(float)
+df["Close/Last"] = df["Close/Last"].str.replace("$", "", regex=False).astype(float)
 df.set_index("Date", inplace=True)
 
 #sort DataFrame by index (Date) in asc order
 df = df.sort_index(ascending=True)
 
-#calculate rolling mean and std dev, then Z-score
-window = 5
-df["Rolling_Mean"] = df["Close/Last"].rolling(window).mean()
+#calculate exponential moving averages (react faster to market changes)
+#also std dev, then Z-score
+window = 20
+df["EMA20"] = df["Close/Last"].ewm(span=window, adjust=False).mean() 
+#adjust=False means doesn't use FULL history / no bias correction - faster 
+df["EMA50"] = df["Close/Last"].ewm(span=50, adjust=False).mean() #used for trend filter
 df["Rolling_Std"] = df["Close/Last"].rolling(window).std()
-df["Z_Score"] = (df["Close/Last"] - df["Rolling_Mean"]) / df["Rolling_Std"]
+df["z_score"] = (df["Close/Last"] - df["EMA20"]) / df["Rolling_Std"]
 
-#calculate 200 day moving average
-df["MA200"] = df["Close/Last"].rolling(window=200).mean()
-df["Bull_Market"] = df["Close/Last"] > df["MA200"]
+
+#bollinger Bands
+df["upper_band"] = df["EMA20"] + 2 * df["Rolling_Std"]
+df["lower_band"] = df["EMA20"] - 2 * df["Rolling_Std"]
+
+#trend filter - moving average
+df['trend_up'] = df['EMA20'] > df['EMA50']
 
 #### PARAMETERS ####
 
-#buy when price is far below mean (with a bit of give)
-df["Long_Entry"] = df["Z_Score"] < -1.5
-#exit long when price returns to mean (with a bit of give)
-df["Long_Exit"] = df["Z_Score"] > 0.5 #better results with 0.5 instead of 0
+#long entry - price below lower band, extreme Z score, trend is up
+df['Long_Entry'] = (df['z_score'] < -1.5) & (df['Close/Last'] < df['lower_band']) & df['trend_up']
 
-#short when price is far above mean (with a bit of give)
-df["Short_Entry"] = df["Z_Score"] > 1.5
-#exit short when price returns to mean (with a bit of give)
-df["Short_Exit"] = df["Z_Score"] < -0.5 #better results with 0.5 instead of 0
+# "&"works with pandas
+
+#short entry - price above upper band, extreme Z score, trend is down
+df['Short_Entry'] = (df['z_score'] > 1.5) & (df['Close/Last'] > df['upper_band']) & (~df['trend_up'])
+
+# Exit: Z-score has returned close to mean (0)
+df['Exit'] = (df['z_score'].abs() < 0.1)
+
 
 
 #### TRADING LOGIC ####
-#simulate trading - half per trade - no fees or slippage
 
 initial_balance = 1000
 balance = initial_balance
@@ -68,50 +76,50 @@ for i in range(len(df)):
 
     #trading logic with trend filter
     if position == 0:
-        #only go long if bull market
-        if df["Long_Entry"].iloc[i] and df["Bull_Market"].iloc[i]:
-            position = 1
-            entry_price = price
+        #long entry with bollenger bands
+        if df["Long_Entry"].iloc[i]:
             trade_amount = balance * conviction
-            shares = trade_amount / price
             entry_fee = trade_amount * fee
-            balance -= (trade_amount + entry_fee) #apply fee to trade amount
+            total_cost = trade_amount + entry_fee #apply fee to trade amount
+            if total_cost <= balance: #prevents negative balance
+                position = 1
+                entry_price = price
+                shares = trade_amount / price #assumes fractional shares
+                balance -= total_cost
+                executed_buys.append(df.index[i])
+                executed_buys_prices.append(price)
 
-            executed_buys.append(df.index[i])
-            executed_buys_prices.append(price)
         #only go short if bear market
-        elif df["Short_Entry"].iloc[i] and not df["Bull_Market"].iloc[i]:
-            position = -1
-            entry_price = price
-            trade_amount = balance * conviction * (1 - fee) #apply fee to trade amount
-            shares = trade_amount / price
+        elif df["Short_Entry"].iloc[i]:
+            trade_amount = balance * conviction 
             entry_fee = trade_amount * fee
-            balance += (trade_amount - entry_fee) #receive cash from short sale, apply fee
-
+            position = -1 
+            entry_price = price 
+            shares = trade_amount / price 
+            balance += (trade_amount - entry_fee) #shorting gives you cash, applies fee
             executed_sells.append(df.index[i])
             executed_sells_prices.append(price)
 
     elif position == 1:
-        if df["Long_Exit"].iloc[i]:
-            position = 0
+        if df["Exit"].iloc[i]:
             exit_price = price
             proceeds = shares * exit_price #sell shares
-            exit_fee = proceeds * fee #apply fee to proceeds
+            exit_fee = proceeds * fee
             balance += (proceeds - exit_fee) #apply fee to exit proceeds
             shares = 0
-
+            position = 0
             executed_sells.append(df.index[i])
             executed_sells_prices.append(price)
 
     elif position == -1:
-        if df["Short_Exit"].iloc[i]:
-            position = 0
+        if df["Exit"].iloc[i]:
+
             exit_price = price
             cost = shares * exit_price #buy back shares
-            exit_fee = cost * fee #apply fee to cost
+            exit_fee = cost * fee
             balance -= (cost + exit_fee) #apply fee to exit cost
             shares = 0
-
+            position = 0
             executed_buys.append(df.index[i])
             executed_buys_prices.append(price)
 
@@ -123,12 +131,12 @@ if position == 1 and shares > 0:
     balance += shares * last_price
     shares = 0
     position = 0
-    print("Force-closed long at end.")
+    #print("Force-closed long at end.") #redundant but useful for debugging
 elif position == -1 and shares > 0:
     balance -= shares * last_price
     shares = 0
     position = 0
-    print("Force-closed short at end.")
+    #print("Force-closed short at end.") #redundant but useful for debugging
 
 #update final portfolio value
 portfolio_values[-1] = balance
@@ -136,14 +144,15 @@ portfolio_values[-1] = balance
 df["Portfolio_Value"] = portfolio_values
 df["Position"] = positions
 
-print(f"Final balance: {balance:.2f}")
-print(f"Final shares: {shares:.4f}")
-print(f"Final position: {position}")
-
-from plotly.subplots import make_subplots
+print(f"Final balance: {balance:.2f}") 
+#print(f"Final shares: {shares:.4f}") #not needed will force close at end
+#print(f"Final position: {position}") #not needed will force close at end
 
 
 #### PLOTLY GRAPHS ####
+
+from plotly.subplots import make_subplots
+
 #subplots
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
                     vertical_spacing=0.1,
@@ -158,25 +167,18 @@ fig.add_trace(go.Candlestick(x=df.index,
                              name="Price"), row=1, col=1)
 
 #rolling mean line
-fig.add_trace(go.Scatter(x=df.index, y=df["Rolling_Mean"],
+fig.add_trace(go.Scatter(x=df.index, y=df["EMA20"],
                          mode="lines",
                          line=dict(color="orange", width=2),
-                         name=f"{window}-Day MA"), row=1, col=1)
+                         name=f"{window}-Day EMA"), row=1, col=1)
 
-fig.add_trace(go.Scatter(x=df.index, y=df["MA200"],
+fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"],
                          mode="lines",
                          line=dict(color="blue", width=2),
-                         name=f"200-Day MA"), row=1, col=1)
+                         name=f"50-Day EMA"), row=1, col=1)
 
 
-# Find min/max Z-score points
-min_z_idx = df["Z_Score"].idxmin()
-max_z_idx = df["Z_Score"].idxmax()
-min_z_price = df.loc[min_z_idx, "Close/Last"]
-max_z_price = df.loc[max_z_idx, "Close/Last"]
-
-
-# Actual executed buys (green triangle-up)
+#executed buys (green triangle)
 fig.add_trace(go.Scatter(
     x=executed_buys,
     y=executed_buys_prices,
@@ -185,7 +187,7 @@ fig.add_trace(go.Scatter(
     name="Executed Buy"
 ), row=1, col=1)
 
-# Actual executed sells (red triangle-down)
+#executed sells (red triangle)
 fig.add_trace(go.Scatter(
     x=executed_sells,
     y=executed_sells_prices,
@@ -194,8 +196,26 @@ fig.add_trace(go.Scatter(
     name="Executed Sell"
 ), row=1, col=1)
 
+#upper Bollinger Band
+fig.add_trace(go.Scatter(
+    x=df.index,
+    y=df["upper_band"],
+    mode="lines",
+    line=dict(color="purple", width=1, dash="dot"),
+    name="Upper Bollinger Band"
+), row=1, col=1)
+
+#lower Bollinger Band
+fig.add_trace(go.Scatter(
+    x=df.index,
+    y=df["lower_band"],
+    mode="lines",
+    line=dict(color="purple", width=1, dash="dot"),
+    name="Lower Bollinger Band"
+), row=1, col=1)
+
 #plot Z-score
-fig.add_trace(go.Scatter(x=df.index, y=df["Z_Score"],
+fig.add_trace(go.Scatter(x=df.index, y=df["z_score"],
                          mode="lines",
                          line=dict(color="green", width=2),
                          name="Z-Score"), row=2, col=1)
