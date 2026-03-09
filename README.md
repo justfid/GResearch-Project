@@ -75,7 +75,7 @@ Trades are executed when multiple indicators align, increasing the probability o
 
 # Backtesting
 
-The strategy was backtested using **Python, pandas, and NumPy** on approximately **10 years of historical equity price data** across multiple stocks.
+The strategy was backtested using **Python and pandas** on approximately **10 years of historical equity price data** across multiple stocks.
 
 The backtesting framework simulates trading decisions based on the generated signals and evaluates performance using quantitative metrics commonly used in finance.
 
@@ -85,7 +85,6 @@ The backtesting framework simulates trading decisions based on the generated sig
 
 - Python  
 - pandas  
-- NumPy  
 - Financial time-series analysis  
 - Statistical signal generation  
 - Quantitative backtesting  
